@@ -1,6 +1,5 @@
 """
 
-
 To debug code in Qt event loop, call pyqtRemoveInputHook before set_trace
 pyqtRemoveInputHook()
 import pdb; pdb.set_trace()
@@ -90,6 +89,7 @@ class TreeMan(QMainWindow):
         self.thread_update_image.start()
     
     def setupUi(self):
+        self.setWindowTitle("Treeman")
         self.central_widget = QWidget()
         self.layout = QVBoxLayout()
         #self.label_qpixmap = QLabel("Hello World!!")
