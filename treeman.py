@@ -16,9 +16,9 @@ from PIL import Image, ImageDraw, ImageFilter
 import numpy as np
 
 from PyQt5.QtWidgets import QApplication, QMainWindow
-from PyQt5.QtWidgets import QLabel, QDialog, QFileDialog
+from PyQt5.QtWidgets import QLabel, QDialog, QFileDialog, QShortcut
 from PyQt5.QtWidgets import QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QCheckBox
-from PyQt5.QtGui import QPixmap, QImage
+from PyQt5.QtGui import QPixmap, QImage, QKeySequence
 from PyQt5.QtCore import Qt, pyqtSignal, QPoint, pyqtRemoveInputHook
 
 RESOLUTION_WIDTH = 640
@@ -82,7 +82,10 @@ class TreeMan(QMainWindow):
         self.btn_pause.clicked.connect(self.on_btn_pause_clicked)
         self.btn_wider.clicked.connect(self.on_btn_bigger_clicked)
         self.btn_narrower.clicked.connect(self.on_btn_smaller_clicked)
-        self.ck_mode.stateChanged.connect(self.on_ch_mode_stateChanged)
+        self.ck_mode_fix.stateChanged.connect(self.on_ck_mode_stateChanged)
+        self.ck_mode_chromakey.stateChanged.connect(self.on_ck_mode_chromakey_stateChanged)
+        self.shortcut_chromakey = QShortcut(QKeySequence('Ctrl+c'), self)
+        self.shortcut_chromakey.activated.connect(self.on_chromakey)
         self.label_qpixmap.label_clicked.connect(self.on_image_clicked)
 
         self.thread_update_image = threading.Thread(target=self.update_image, daemon=True)
@@ -95,20 +98,26 @@ class TreeMan(QMainWindow):
         #self.label_qpixmap = QLabel("Hello World!!")
         self.label_qpixmap = ClickLabel("Hello World!!")
         self.label_qpixmap.setFixedSize(RESOLUTION_WIDTH, RESOLUTION_HEIGHT)
+
+        self.widget_control = QWidget()
         self.btn_pause = QPushButton("Pause")
         self.btn_bg = QPushButton("Background")
-        self.ck_mode = QCheckBox("Fix location")
+        self.ck_mode_fix = QCheckBox("Fix location at clicked")
+        self.ck_mode_chromakey = QCheckBox("Chroma Key (Ctr+c)")
         self.btn_narrower = QPushButton("Narrower")
         self.btn_wider = QPushButton("Wider")
         self.layoutH = QHBoxLayout()
         self.layoutH.addWidget(self.btn_bg)
         self.layoutH.addWidget(self.btn_pause)
-        self.layoutH.addWidget(self.ck_mode)
+        self.layoutH.addWidget(self.ck_mode_fix)
+        self.layoutH.addWidget(self.ck_mode_chromakey)
         self.layoutH.addWidget(self.btn_wider)
         self.layoutH.addWidget(self.btn_narrower)
+        self.widget_control.setLayout(self.layoutH)
 
         self.layout.addWidget(self.label_qpixmap)
-        self.layout.addLayout(self.layoutH)
+        #self.layout.addLayout(self.layoutH)
+        self.layout.addWidget(self.widget_control)
         self.central_widget.setLayout(self.layout)
         self.setCentralWidget(self.central_widget)
 
@@ -158,29 +167,72 @@ class TreeMan(QMainWindow):
                     continue
                 if self.multiplier != 1.0:
                     face = self.resize_face(face)
-                if self.ck_mode.isChecked():
-                    # fixed location mode
-                    mask = Image.new('L', (face[2], face[3]), 0)
-                    draw = ImageDraw.Draw(mask)
-                    draw.ellipse([(20,20), (face[2]-20, face[3]-20)], fill=255, outline=None, width=10)
-                    del(draw)
-                    mask = mask.filter(ImageFilter.GaussianBlur(10)) # adjust radius according to face area size
-                    box = (face[0], face[1], face[0]+face[2], face[1]+face[3])
-                    img_crop = img.crop(box)
-                    embed_box = (self.target_center[0]-int(face[2]/2),
-                                 self.target_center[1]-int(face[3]/2),
-                                 self.target_center[0]-int(face[2]/2) + face[2], 
-                                 self.target_center[1]-int(face[3]/2) + face[3])
-                    img = self.bg.copy()
-                    img.paste(img_crop, box=embed_box, mask=mask)
-
+                if self.ck_mode_fix.isChecked():
+                    if not self.ck_mode_chromakey.isChecked():
+                        # fixed location mode
+                        mask = Image.new('L', (face[2], face[3]), 0)
+                        draw = ImageDraw.Draw(mask)
+                        draw.ellipse([(20,20), (face[2]-20, face[3]-20)], fill=255, outline=None, width=10)
+                        del(draw)
+                        mask = mask.filter(ImageFilter.GaussianBlur(10)) # adjust radius according to face area size
+                        box = (face[0], face[1], face[0]+face[2], face[1]+face[3])
+                        img_crop = img.crop(box)
+                        embed_box = (self.target_center[0]-int(face[2]/2),
+                                    self.target_center[1]-int(face[3]/2),
+                                    self.target_center[0]-int(face[2]/2) + face[2], 
+                                    self.target_center[1]-int(face[3]/2) + face[3])
+                        img = self.bg.copy()
+                        img.paste(img_crop, box=embed_box, mask=mask)
+                    else:
+                        # fixed location mode and in chroma key mode
+                        face_size = (face[2], face[3])
+                        bg_white = Image.new('L', face_size, 255)
+                        mask = Image.new('L', face_size, 255)
+                        mask_paste = Image.new('L', face_size, 0)
+                        draw = ImageDraw.Draw(mask)
+                        draw.ellipse([(20,20), (face[2]-20, face[3]-20)], fill=0, outline=None, width=10)
+                        del(draw)
+                        draw_paste = ImageDraw.Draw(mask_paste)
+                        draw_paste.ellipse([(20,20), (face[2]-20, face[3]-20)], fill=255, outline=None, width=10)
+                        del(draw_paste)
+                        mask = mask.filter(ImageFilter.GaussianBlur(10)) # adjust radius according to face area size
+                        box = (face[0], face[1], face[0]+face[2], face[1]+face[3])
+                        img_crop = img.crop(box)
+                        embed_box = (self.target_center[0]-int(face[2]/2),
+                                    self.target_center[1]-int(face[3]/2),
+                                    self.target_center[0]-int(face[2]/2) + face[2], 
+                                    self.target_center[1]-int(face[3]/2) + face[3])
+                        img_comp = Image.composite(bg_white, img_crop, mask)
+                        img = self.bg.copy()
+                        img.paste(img_comp, box=embed_box, mask=mask_paste)
                 else:
-                    mask = Image.new('L', RES, 255)
-                    draw = ImageDraw.Draw(mask)
-                    draw.ellipse([(face[0], face[1]), (face[0]+face[2], face[1]+face[3])], fill=0, outline=None, width=10)
-                    del(draw)
-                    mask = mask.filter(ImageFilter.GaussianBlur(20)) # adjust radius according to face area size
-                    img = Image.composite(self.bg, img, mask)
+                    if not self.ck_mode_chromakey.isChecked():
+                        mask = Image.new('L', RES, 255)
+                        draw = ImageDraw.Draw(mask)
+                        draw.ellipse([(face[0], face[1]), (face[0]+face[2], face[1]+face[3])], fill=0, outline=None, width=10)
+                        del(draw)
+                        mask = mask.filter(ImageFilter.GaussianBlur(20)) # adjust radius according to face area size
+                        img = Image.composite(self.bg, img, mask)
+                    else:
+                        # in normal location mode and in chroma key
+                        face_size = (face[2], face[3])
+                        bg_white = Image.new('L', face_size, 255)
+                        mask = Image.new('L', face_size, 255)
+                        mask_paste = Image.new('L', face_size, 0)
+                        draw = ImageDraw.Draw(mask)
+                        draw.ellipse([(20,20), (face[2]-20, face[3]-20)], fill=0, outline=None, width=10)
+                        del(draw)
+                        draw_paste = ImageDraw.Draw(mask_paste)
+                        draw_paste.ellipse([(20,20), (face[2]-20, face[3]-20)], fill=255, outline=None, width=10)
+                        del(draw_paste)
+                        mask = mask.filter(ImageFilter.GaussianBlur(10)) # adjust radius according to face area size
+                        box = (face[0], face[1], face[0]+face[2], face[1]+face[3])
+                        img_crop = img.crop(box)
+                        embed_box = (face[0], face[1])
+                        img_comp = Image.composite(bg_white, img_crop, mask)
+                        img = self.bg.copy()
+                        img.paste(img_comp, box=embed_box, mask=mask_paste)
+
             else:
                 continue
 
@@ -274,7 +326,7 @@ class TreeMan(QMainWindow):
     def on_image_clicked(self, pos):
         self.target_center = (pos.x(), pos.y())
     
-    def on_ch_mode_stateChanged(self, state):
+    def on_ck_mode_stateChanged(self, state):
         """
         Adjust area size due difference by mask size
         """
@@ -283,6 +335,37 @@ class TreeMan(QMainWindow):
             self.multiplier += adjustment
         else:
             self.multiplier -= adjustment
+    
+    def on_ck_mode_chromakey_stateChanged(self, state):
+        """
+        Hide most of UI when in Chroma Key mode
+        """
+        _state = not state # Hide when checked
+        self.widget_control.setVisible(_state)
+        if _state:
+            self.setStyleSheet("")
+            self.setWindowFlags(Qt.Window)
+            self.show()
+        else:
+            self.setStyleSheet("background:rgb(0, 177, 64)") # chroma key green
+            self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
+            self.show()
+        # adjust size
+        if self.ck_mode_fix.isChecked():
+            adjustment = 0.1 # fix mode already adjust some
+        else:
+            adjustment = 0.4
+        if state == Qt.Checked:
+            self.multiplier += adjustment
+        else:
+            self.multiplier -= adjustment
+
+    def on_chromakey(self):
+        """
+        Keyboard shortcut to toggle checkbox
+        """
+        _state = not self.ck_mode_chromakey.isChecked()
+        self.ck_mode_chromakey.setChecked(_state)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Treeman')
